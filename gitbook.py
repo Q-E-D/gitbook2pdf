@@ -67,7 +67,7 @@ class HtmlGenerator():
         "Return the file contents with paths replaced"
         absolutePath = self.base_url
         pathStr = match.group(3)
-        if pathStr.startswith(".."):
+        if pathStr.startswith("..") or pathStr.startswith("data"):
             pathStr = pathStr[3:]
         return "<" + match.group(1) + match.group(2) + "=" + "\"" + absolutePath + pathStr + "\"" + match.group(
             4)  + ">"
