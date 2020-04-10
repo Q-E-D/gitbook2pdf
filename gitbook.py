@@ -36,7 +36,7 @@ def get_level_class(num):
 
 
 class HtmlGenerator():
-    def __init__(self, base_url, url_dict):
+    def __init__(self, base_url):
         self.html_start = """
 <!DOCTYPE html>
 <html lang="en">
@@ -52,7 +52,6 @@ class HtmlGenerator():
 </html>
 """
         self.base_url = base_url
-        self.url_dict = url_dict
 
     def add_meta_data(self, key, value):
         meta_string = "<meta name={key} content={value}>".format_map({
@@ -72,9 +71,8 @@ class HtmlGenerator():
             pathStr = pathStr[3:]
         if pathStr.startswith("data"):
             absolutePath = ""
-        elif self.url_dict[pathStr] :
+        elif pathStr.startswith("#") :
             absolutePath = ""
-            pathStr = "#" + self.url_dict[pathStr]
         return "<" + match.group(1) + match.group(2) + "=" + "\"" + absolutePath + pathStr + "\"" + match.group(
             4)  + ">"
 
@@ -90,22 +88,34 @@ class HtmlGenerator():
 
 
 class ChapterParser():
-    def __init__(self, original,index_title, data_level, baselevel=0):
+    def __init__(self, original,index_title, baselevel=0):
         self.heads = {'h1': 1, 'h2': 2, 'h3': 3, 'h4': 4, 'h5': 5, 'h6': 6}
         self.original = original
         self.baselevel = baselevel
         self.index_title = index_title
-        self.data_level = data_level
 
     def parser(self):
         tree = ET.HTML(self.original)
         if tree.xpath('//section[@class="normal markdown-section"]'):
             context = tree.xpath('//section[@class="normal markdown-section"]')[0]
+            hrefs = tree.xpath('//section[@class="normal markdown-section"]//a')
         else:
             context = tree.xpath('//section[@class="normal"]')[0]
+            hrefs = tree.xpath('//section[@class="normal"]//a')
         if context.find('footer'):
             context.remove(context.find('footer'))
-        context.set("id", self.data_level)
+
+        lis = tree.xpath("//ul[@class='summary']//li")
+        lis_dict = {l.get('data-path') : l.get('data-level') for l in lis}
+        currentSection = tree.xpath("//ul[@class='summary']//li[@class='chapter active']")[0]
+        context.set("id", currentSection.get('data-level'))
+
+        for h in hrefs:
+            if(h.get('href') in lis_dict):
+                print("fix" + h.get('href'))
+                h.set('href', "#" + lis_dict[h.get('href')])
+
+
         context = self.parsehead(context)
         return html.unescape(ET.tostring(context).decode())
 
@@ -152,9 +162,7 @@ class IndexParser():
                 content_urls.append({
                     'url': "",
                     'level': level,
-                    'title': title,
-                    'data_level': "",
-                    'data_path': "",
+                    'title': title
                 })
             elif "chapter" in element_class:
                 data_level = li.attrib.get('data-level')
@@ -168,9 +176,7 @@ class IndexParser():
                             {
                                 'url': url,
                                 'level': level,
-                                'title': title,
-                                'data_level': data_level,
-                                'data_path': data_path
+                                'title': title
                             }
                         )
                         found_urls.append(url)
@@ -181,9 +187,7 @@ class IndexParser():
                     content_urls.append({
                         'url': "",
                         'level': level,
-                        'title': title,
-                        'data_level': "",
-                        'data_path': "",
+                        'title': title
                     })
         return content_urls
 
@@ -209,11 +213,10 @@ class Gitbook2PDF():
         loop.run_until_complete(self.crawl_main_content(content_urls))
         loop.close()
 
-        url_dict = {u['data_path'] : u['data_level'] for u in content_urls}
         # main body
         body = "".join(self.content_list)
         # 使用HtmlGenerator类来生成HTML
-        html_g = HtmlGenerator(self.base_url, url_dict)
+        html_g = HtmlGenerator(self.base_url)
         html_g.add_body(body)
         for key, value in self.meta_list:
             html_g.add_meta_data(key, value)
@@ -227,7 +230,7 @@ class Gitbook2PDF():
         tasks = []
         for index, urlobj in enumerate(content_urls):
             if urlobj['url']:
-                tasks.append(self.gettext(index, urlobj['url'], urlobj['level'],urlobj['title'], urlobj['data_level']))
+                tasks.append(self.gettext(index, urlobj['url'], urlobj['level'],urlobj['title']))
             else:
                 tasks.append(self.getext_fake(index, urlobj['title'], urlobj['level']))
         await asyncio.gather(*tasks)
@@ -239,7 +242,7 @@ class Gitbook2PDF():
         string = f"<h1 class='{class_}'>{title}</h1>"
         self.content_list[index] = string
 
-    async def gettext(self, index, url, level, title, data_level):
+    async def gettext(self, index, url, level, title):
         '''
         return path's html
         '''
@@ -251,7 +254,7 @@ class Gitbook2PDF():
             print("retrying : ", url)
             metatext = await request(url, self.headers)
         try:
-            text = ChapterParser(metatext, title, data_level, level).parser()
+            text = ChapterParser(metatext, title, level).parser()
             print("done : ", url)
             self.content_list[index] = text
         except IndexError:
